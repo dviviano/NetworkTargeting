@@ -1,0 +1,378 @@
+---
+title: "R Package for \"Policy Targeting under Network Interference\" (by D. Viviano)"
+author: 'R package developed by Jacob Carlson and Davide Viviano'
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{introduction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+## Description
+
+
+- This package implements the method of the paper: Viviano, Davide. "Policy Targeting under Network Interference" (forthcoming in Review of Economic Studies).
+
+- Given outcomes of each individual, treatments and covariates of $n$ units, and an adjacency matrix between individuals with binary entries, the package estimates which individuals should be treated to maximize the expected outcome (welfare).
+
+- **Note:** Researchers do not need to observe the entire adjacency matrix, but need to observe the covariates and treatments and friends of a subset of individuals, which we will call *focal units* (see the description of the inputs below).
+
+- The package implements an exact optimization procedure and an approximate procedure. The exact procedure is recommended for small $n$, and the approximate procedure for large $n$. We describe first the exact procedure. We describe the approximate procedure at the end. 
+
+
+## Dependencies 
+
+
+- To implement the exact procedure, the user needs to install Gurobi on their local machine (www.gurobi.com), which is free for academic use. The user must also install the Gurobi version for R, as described in the website above. 
+
+- To implement the approximate procedure, there is no need to install Gurobi on your local machine. 
+
+
+## Exact optimization procedure `method = 'MILP'`
+
+
+In the following example we generate a simple DGP and illustrate the functions of interest. 
+
+### Example of data generating process to illustrate the method
+
+```{r setup}
+library(NetworkTargeting)
+
+## Hyperparameters
+n <- 50
+p = 4
+mu = 1
+
+## Simulate coefficients 
+set.seed(99)
+b_1 <- sample(c(-1,1), replace = T, size = p)
+b_2 <- sample(c(-1,1), replace = T, size = p)
+b_3 <- sample(c(-1,1), replace = T, size = p)
+b_4 <- sample(c(-1.5,1.5), replace = T, size = p)
+b_5 <- sample(c(-1,1), replace = T, size = p)
+
+## Simulate covariates 
+X <- runif(n*p, min = -1, max = 1)
+X <- matrix(X, nrow=n, ncol=p)
+
+## Simulate geometric network 
+edges <- matrix(NA, nrow = n, ncol = n)
+for(i in 1:(n-1)){ 
+  edges[c((i + 1):n), i] <- sapply( abs(X[i,2] - X[ (i + 1):n,2])/2 +  abs(X[i,4] - X[ (i + 1):n,4])/2 , function(x) ifelse(x <= sqrt(4/(2.75*n)), 1, 0 ) )
+}
+diag(edges) <- rep(1,n)
+edges[upper.tri(edges)] <- t(edges)[upper.tri(edges)]
+edges[is.na(edges)] <- rev(edges[upper.tri(edges)])
+
+## Simulate W
+W <- edges
+W_0 <- W
+diag(W_0) <- rep(0, n)
+
+## Draw neighbors 
+D <- sapply(X%*%b_1 + rnorm(n), function(x) ifelse(x > 0, 1, 0))
+spill1 <- X%*%b_3
+spill2 <- mu + X%*%b_5
+cate <-   X%*%b_4
+errors <- rnorm(n)
+
+## Local dependence 
+errors <- errors/sqrt(2) + W_0%*%errors/(sqrt(2*max(1, apply(W_0, 1, sum))))
+neighbors <-apply(W_0, 1, sum)
+neighbors <- sapply(neighbors, function(x) ifelse(x > 0, x, 1))
+y <-   as.vector(W_0%*%D)*spill2/neighbors + D*cate +  as.vector(D)*as.vector(W_0%*%D)*spill1/neighbors + errors
+```
+
+### Exact Optimization `method = 'MILP'`
+
+In the following lines we implement the method invoking the function `NetworkTargeting`. The user may select `help(NetworkTargeting)` for details. See below also for details on the parameters. 
+
+**Inputs** 
+
+- `Y`: vector of outcomes. Y must contain missing values for those units whose neighbors are unknown but who are neighbors of focal points;
+-  `X`: variables for targeting;
+- `Z`: variables used for estimating the conditional mean function and the propensity score;
+- `Z_int`: variables included in the regression that interact with individual and neighbors' covariates;
+- `D`: binary treatment assignments;
+- `W_0`: adjacency matrix with 0/1 entries; the rows and columns corresponding to focal units should not have missing values (either entries can be missing)
+- `W_0_train`: adjacency matrix for training. Default is that W_0_train equals W_0.
+- `cost`: cost of the treatment, default is zero;
+- `method`: either "MILP", "MILP_graph_clustering", "surrogate", or "MILP_sparse". (see below for descriptions; 'MILP' denotes the exact procedure)
+- `focal_units`: vector of length $n$, indicating with 1 whether an individual is focal, and zero otherwise. An individual should be focal if all of her neighbors are observed. By default, all individuals are focal.
+- `model`: model used for estimation. Any of 'penalized_regression' (implemented via lasso), 'linear_regression', or 'random_forest'
+- `family`:   family of the outcome, either 'gaussian' or 'binary';
+- `maximum_treated`: maximum number of treated units. NA indicates that no constraint is imposed;
+- `maximum_time`: time limit;
+- `params`: list with additional parameters (see below)
+
+In this example we use the first two columns of $X$ to design treatments. We estimate the conditional mean function and the propensity score using all information we have about the $X$. 
+
+```{r}
+#' @return final_coef: coefficients of the policy;
+#' @return policies: individual treatment assignments
+
+opt1 <- NetworkTargeting(
+  Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0, 
+  cost = 0, method = 'MILP', maximum_time = 100, 
+  focal_units = rep(1, length(y)), 
+  params = list(numcores = 2, verbose = F))
+```
+
+### Extracting the policy 
+
+We can extract the policies as follows:  
+
+```{r}
+opt1$final_coef
+```
+
+Above, we print the coefficients of the estimated policy (the first coefficient is the intercept):
+
+$$
+\pi(X)= 1\Big\{ X^\top \beta > 0\Big\}.  
+$$ 
+
+### Prediction
+
+To predict the treatment status we can use the following code: 
+
+```{r}
+## Policies 
+policies1 <- PredictPolicies(opt1, X[, c(1,2)])
+
+## Compute welfare associated with the policy
+objective1 <- NetworkWelfare(
+  policies = policies1, Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0)
+print(objective1$welfare)
+
+## Compare with welfare with treating none of the individuals 
+policies_none_treated = rep(0, n)
+objective_not_treated <- NetworkWelfare(
+  policies = policies_none_treated, Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0)
+print(objective_not_treated$welfare)
+```
+
+Plot the network with red denoting individuals to be treated and blue individuals to keep under control:
+
+```{r}
+suppressMessages(library(igraph))
+
+network <- graph_from_adjacency_matrix(W_0, mode='undirected', diag=F )
+color = sapply(policies1, function(x) ifelse(x == 1, 'red', 'blue'))
+my_plot = plot(network, vertex.size     = degree(network) +4, vertex.label    = NA,
+     vertex.color    = color)
+```
+
+
+## Parameters for exact optimization `method = 'MILP'`
+
+
+It is possible to select additional parameters and pass them under `params_list`. Here is a list of parameters that the user can choose. 
+
+```{r}
+params_default = list(
+  # fitted model for conditional mean(if NA - default estimation is performed)
+  ## if cross fitting = T, m1 needs to be a list of models for each obs
+  m1 = NA,
+  # remove effects on units with high degree from computations for increasing speed
+  cut_high_neighb = F,
+  # tolerance constraints for the MILP program (do not set less than 10**(-6))
+  tolerance_constraint1 = 10**(-3),
+  tolerance_constraint2 = 10**(-3),
+  ## Upper and lower bound for the parameters
+  B = 1, low_b = - 1,
+  ## list of parameters to pass to gurobi
+  params_gurobi = NA,
+  ## introduce monotonicity constraint in the optimization (default FALSE)
+  monotonicity_c = F,
+  ## use double robust estimation
+  doubly_robust = T,
+  ## penalized method for estimating the propensity score
+  penalized= F,
+  ## number of strata for propensity score estimation (aggregate individuals with similar percentage of treated neighbors)  If NA each number of neighbor correspond to a different treatment status
+  num_strata = 4,
+  ## trimming on the propensity score (extrapolation is performed)
+  trimming = 0.01,
+  ## if not NA, a matrix with nrow = dim(X)[2] + 1 indicating upper bound (left column) and lower bound (right column) for each parameter
+  additional_param_constraints = NA,
+  ## return the gurobi model output without computations
+  model_return = F,
+  ## names of the column of the model passed to a random forest (keep NA, active only if m1 != 0 and is a random forest)
+  names_rf = NA,
+  ## print checking values for model stability
+  print_checking = F,
+  ## return the estimated conditional mean functions
+  return_m1 = F,
+  ## upper and lower bounds on the outcme variable
+  bound_outcomes = c(-Inf, Inf),
+  ## removed the subpopulation that is trimmed
+  trimmed_subpopulation = F,
+  ## minimum number of treated units
+  min_treated = 0,
+  ## number of cores for computations
+  numcores = 1,
+  ## cross_fitting: boolean note: m1 if not NA has to be a list with models for each observation (done via mincut)
+  cross_fitting = F,
+  ## when computing partitions of the graph for cross fitting
+  ## use a slack parameter to find approximately equal sized
+  ## partitions up to +- slack number of obs
+  slack = 10,
+  ## n_folds: number of folds for cross fitting
+  n_folds = 10,
+  ## print output from optimization
+  verbose = F
+)
+
+```
+
+
+## Approximation procedure for medium scale $n$ or block-diagonal graph `MILP = 'MILP_graph_clustering'`
+
+
+When the adjacency matrix presents an (almost but not necessarily exact) block diagonal structure, it is possible to solve the welfare maximization problem in each block separately. The following function uses an approximation device that maximizes the empirical welfare by first partitioning the network into approximately independent sub-components (solved via a max-cut program) and then estimating the policy in each sub-network. The function returns the policy with largest welfare across all networks. 
+
+This implementation can be used to reduce the time complexity, while still using a mixed integer linear program formulation. 
+
+```{r}
+#' @return final_coef: coefficients of the policy;
+#' @return policies: individual treatment assignments
+#' @return solutions_clustering: matrix with solutions when MILP_graph_clustering is selected
+#' @return partitions: list of indexes with partitions of the graph if MILP_graph_clustering is selected
+
+opt2 <- NetworkTargeting(
+  Y = y, X = X[, c(1,2)], Z = X,
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0, 
+  cost = 0, method = "MILP_graph_clustering", maximum_time = 100, 
+  params = list(
+    numcores = 2, verbose = F,
+    ## maximum time for the partition used to cut the network (active if MILP_graph_clustering is selected)
+    maxtime_partitions = 100,
+    ## size of each sub-partition of the network (active if MILP_graph_clustering is selected)
+    length_small_samples = 20))
+
+## Policies 
+policies2 <- PredictPolicies(opt2, X[, c(1,2)])
+
+## Compute welfare associated with the policy
+objective2 <- NetworkWelfare(
+  policies = policies2, Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0)
+print(objective2$welfare)
+```
+
+**Three important parameters for** `MILP_graph_clustering`
+
+Two important parameters for the approximate method are:
+
+- `maxtime_partitions`: maximum time to find the maximum cut in the graph  
+- `length_small_samples`: the size of each partition on which the policy is estimated. The larger, the more accurate is the optimization, but the longer the waiting time 
+- `partitions`: list of vectors containing the indexes of pre-existing clusters. If missing, the algorithm will find clusters through optimizations. 
+
+
+## Approximate optimization for large $n$ `method = 'surrogate'`, recommended for $n \ge 500$
+
+
+The approximate optimization procedure uses a smoothed maximum score version of the mixed-integer linear program. Specifically, we smooth the indicator $1\{X^\top \beta > 0\}$ with $\Phi(X^\top \beta/\sigma)$ and the indicator corresponding to the number of treated friends with an exponential function which assigns to each possible number of treated friends $h$, weight $\exp\Big(-\lambda (h - \sum_{k \in N_i} \pi(X_k))^2\Big)$. 
+
+The parameters $(\sigma, \lambda)$ govern the smoothing of the objective function. A smaller $\sigma$ and larger $\lambda$ should be used with a larger sample size. In practice, you can cross-validate these choices.
+
+N.B.: the surrogate procedure is optimized using gradient descent with backpropagation through some differentiable policy function; this routine therefore also in theory supports policy functions modeled using more flexible function classes (e.g., neural networks like simple MLPs).
+
+```{r}
+#' @return final_coef: coefficients of the policy;
+#' @return policies: individual treatment assignments
+
+## Note: if opt3 has an error, run it twice, as the algorithm is randomized
+opt3 <- NetworkTargeting(
+  Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0, 
+  cost = 0, method = 'surrogate', maximum_time = 100, 
+  focal_units = rep(1, length(y)), 
+  params = list(
+    numcores = 2, 
+    ## smoothing parameters lambda and sigma 
+    lambda = 1,
+    sigma = 0.1, 
+    lr = 1e-2,
+    ## optional cross-validation of hyperparameters in grid
+    # cross_validation = list('sigma'=c(1, 0.1), 'lambda'=c(1, 10), epochs = c(20, 50), lr = c(1e-2, 2e-3)),
+    ## epochs governs the running time for 
+    ## surrogate loss (reduce this to improve computational time)
+    epochs = 100))
+
+## Policies 
+policies3 <- PredictPolicies(opt3, X[, c(1,2)])
+
+## Compute welfare associated with the policy
+objective3 <- NetworkWelfare(
+  policies = policies3, Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0)
+print(objective3$welfare)
+```
+
+
+## Exact optimization with very large networks on internal machine `method = 'MILP_sparse'`
+
+With a very large network you can have RAM constraints. We implemented a slower version of the MILP algorithm that uses a sparse matrix of constraints, saving memory. 
+
+To implement this function you need to make sure that Gurobi works in R through the R package `ROI` and `ompr`. If you have issues see below for optimization using the original Gurobi model. 
+
+```{r}
+#' @return final_coef: coefficients of the policy;
+#' @return policies: individual treatment assignments
+
+opt4 <- NetworkTargeting(
+  Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0, 
+  cost = 0, method = 'MILP_sparse', maximum_time = 100, 
+  focal_units = rep(1, length(y)), 
+  params = list(numcores = 2, 
+  ## pass the solver used 
+  solver = 'gurobi', verbose=F))
+
+## Policies 
+policies4 <- PredictPolicies(opt4, X[, c(1,2)])
+
+## Compute welfare associated with the policy
+objective4 <- NetworkWelfare(
+  policies = policies4, Y = y, X = X[, c(1,2)], Z = X,
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0)
+print(objective4$welfare)
+```
+
+
+## Exact optimization with very large networks on external machine (selected `model_return = T` in the params list)
+
+
+We can be interested in optimizing the model exactly with a large network. In this case, we suggest to run the following commands. 
+
+```{r}
+model <- NetworkTargeting(
+  Y = y, X = X[, c(1,2)], Z = X, 
+  Z_int = X, D = D, W_0 = W_0, W_0_train = W_0, 
+  cost = 0, method = 'MILP', maximum_time = 100, 
+  params = list(model_return = T, verbose = F))
+
+## The function creates a Gurobi model. The model can be saved as follows: 
+## Uncomment line 
+
+# written_model <- gurobi_write(model, filename = './model.mps')
+```
+
+The above function saves a `.mps` file. The file can now be solved calling it from the shell of an external machine calling the function with the shell script: 
+
+`gurobi_cl InputFile=./MS.prm ResultFile=./model.sol ./model.mps`
+
+The file `MS.prm` must contain the parameters. The default `.prm` can be found on the paper replication package available on the author's webpage dviviano.github.io/projects.
+

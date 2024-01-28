@@ -1,0 +1,41 @@
+Package: NetworkTargeting
+Title: NetworkTargeting
+Version: 0.0.0.9000
+Authors@R: 
+    c(person(given = "Davide",
+           family = "Viviano",
+           role = c("aut", "cre"),
+           email = "dviviano@fas.harvard.edu"), 
+    person(given = "Jake",
+           family = "Carlson",
+           role = c("aut"),
+           email = "jacob_carlson@g.harvard.edu"))
+Description: The package computes welfare maximizing policies with spillovers
+License: What license it uses
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.2.3
+Imports:
+    ROI,
+    ROI.plugin.glpk,
+    ROI.plugin.gurobi,
+    glmnet,
+    ompr,
+    ompr.roi,
+    randomForest,
+    torch,
+    parallel,
+    foreach,
+    doParallel,
+    igraph, 
+    gurobi, 
+    tidyverse, 
+    stats, 
+    doMC
+Depends: 
+    tidyverse,
+    R (>= 3.5.0)
+Suggests: 
+    rmarkdown,
+    knitr
+VignetteBuilder: knitr
