@@ -1,6 +1,6 @@
 ---
-title: "R Package for \"Policy Targeting under Network Interference\" (by D. Viviano)"
-author: 'R package developed by Jacob Carlson and Davide Viviano'
+title: "R Package for \"Policy Targeting under Network Interference\""
+author: 'Reference: \"Policy Targeting under Network Interference\" (Viviano, forthcoming in Restud). R package developed by Jacob Carlson and Davide Viviano'
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{introduction}
@@ -15,12 +15,10 @@ knitr::opts_chunk$set(
 )
 ```
 
-
+ 
 ## Description
 
-
-- This package implements the method of the paper: Viviano, Davide. "Policy Targeting under Network Interference" (forthcoming in Review of Economic Studies).
-
+ 
 - Given outcomes of each individual, treatments and covariates of $n$ units, and an adjacency matrix between individuals with binary entries, the package estimates which individuals should be treated to maximize the expected outcome (welfare).
 
 - **Note:** Researchers do not need to observe the entire adjacency matrix, but need to observe the covariates and treatments and friends of a subset of individuals, which we will call *focal units* (see the description of the inputs below).
@@ -273,7 +271,7 @@ print(objective2$welfare)
 
 **Three important parameters for** `MILP_graph_clustering`
 
-Two important parameters for the approximate method are:
+Three important parameters for the approximate method are:
 
 - `maxtime_partitions`: maximum time to find the maximum cut in the graph  
 - `length_small_samples`: the size of each partition on which the policy is estimated. The larger, the more accurate is the optimization, but the longer the waiting time 
@@ -285,7 +283,7 @@ Two important parameters for the approximate method are:
 
 The approximate optimization procedure uses a smoothed maximum score version of the mixed-integer linear program. Specifically, we smooth the indicator $1\{X^\top \beta > 0\}$ with $\Phi(X^\top \beta/\sigma)$ and the indicator corresponding to the number of treated friends with an exponential function which assigns to each possible number of treated friends $h$, weight $\exp\Big(-\lambda (h - \sum_{k \in N_i} \pi(X_k))^2\Big)$. 
 
-The parameters $(\sigma, \lambda)$ govern the smoothing of the objective function. A smaller $\sigma$ and larger $\lambda$ should be used with a larger sample size. In practice, you can cross-validate these choices.
+The parameters $(\sigma, \lambda)$ govern the smoothing of the objective function. A smaller $\sigma$ and larger $\lambda$ should be used with a larger sample size. In practice, you can **cross-validate** these choices. To run cross validation pass to the params list the command cross_validation as below. You can cross-validate any choice of tuning parameters by passing for each of these the vector of values through which you want to cross-validate. 
 
 N.B.: the surrogate procedure is optimized using gradient descent with backpropagation through some differentiable policy function; this routine therefore also in theory supports policy functions modeled using more flexible function classes (e.g., neural networks like simple MLPs).
 
@@ -306,6 +304,7 @@ opt3 <- NetworkTargeting(
     sigma = 0.1, 
     lr = 1e-2,
     ## optional cross-validation of hyperparameters in grid
+    ## Uncomment line below for cross_validation 
     # cross_validation = list('sigma'=c(1, 0.1), 'lambda'=c(1, 10), epochs = c(20, 50), lr = c(1e-2, 2e-3)),
     ## epochs governs the running time for 
     ## surrogate loss (reduce this to improve computational time)
@@ -328,7 +327,7 @@ With a very large network you can have RAM constraints. We implemented a slower 
 
 To implement this function you need to make sure that Gurobi works in R through the R package `ROI` and `ompr`. If you have issues see below for optimization using the original Gurobi model. 
 
-```{r}
+```{r, eval = F}
 #' @return final_coef: coefficients of the policy;
 #' @return policies: individual treatment assignments
 
