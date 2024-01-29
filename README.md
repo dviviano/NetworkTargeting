@@ -23,7 +23,7 @@ This package contains the functions:
 - `PredictPolicies`
 
 
-See the [vignette](vignettes/vignette_Jan2024.Rmd) for more details on proper usage. Further details on function arguments are available by calling `help` with the name of the function of interest.
+See the [vignette](https://dviviano.github.io/blog/posts/NetworkTargeting/index.html) for more details on proper usage. Further details on function arguments are available by calling `help` with the name of the function of interest.
 
 ## Reference 
 
